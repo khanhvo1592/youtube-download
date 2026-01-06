@@ -26,24 +26,75 @@ class VideoDownloader:
         ]
         return any(re.search(pattern, url, re.IGNORECASE) for pattern in patterns)
     
+    def _normalize_facebook_url(self, url: str) -> str:
+        """Chuẩn hóa URL Facebook để yt-dlp có thể xử lý"""
+        # Đảm bảo có protocol
+        if not url.startswith('http'):
+            url = 'https://' + url
+        
+        # yt-dlp hỗ trợ tốt các URL Facebook bao gồm:
+        # - facebook.com/video.php?v=...
+        # - facebook.com/watch?v=...
+        # - facebook.com/reel/...
+        # - facebook.com/share/v/...
+        # - fb.watch/...
+        # Giữ nguyên URL, yt-dlp sẽ tự xử lý
+        return url
+    
     async def get_video_info(self, url: str) -> VideoInfo:
         """Lấy thông tin video (formats, title, duration)"""
         if not self._is_valid_url(url):
             raise ValueError("URL không được hỗ trợ. Chỉ hỗ trợ YouTube, Facebook, TikTok")
         
+        # Chuẩn hóa URL Facebook
+        url = self._normalize_facebook_url(url)
+        
         def extract_info():
             ydl_opts = {
                 'quiet': True,
                 'no_warnings': True,
+                # Cấu hình cho Facebook (hỗ trợ video, reel, watch)
+                'extractor_args': {
+                    'facebook': {
+                        'video': {
+                            'skip_dash_manifest': False,
+                        }
+                    }
+                },
+                # User agent để tránh bị chặn
+                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                # Thêm referer để tránh bị chặn
+                'referer': 'https://www.facebook.com/',
             }
             
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                return info
+            try:
+                print(f"[yt-dlp] Đang lấy thông tin từ URL: {url}")
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    print(f"[yt-dlp] Lấy thông tin thành công: {info.get('title', 'Unknown')}")
+                    return info
+            except yt_dlp.utils.DownloadError as e:
+                error_msg = str(e)
+                print(f"[yt-dlp ERROR] DownloadError: {error_msg}")
+                # Cải thiện thông báo lỗi
+                if 'Private video' in error_msg or 'login' in error_msg.lower() or 'authentication' in error_msg.lower():
+                    raise ValueError("Video này là riêng tư hoặc yêu cầu đăng nhập Facebook. Vui lòng thử với video công khai.")
+                elif 'Unsupported URL' in error_msg or 'No video formats found' in error_msg or 'Unable to extract' in error_msg:
+                    raise ValueError(f"Không thể tải video từ URL này. Có thể video không tồn tại, không hỗ trợ hoặc yêu cầu đăng nhập. Chi tiết: {error_msg[:200]}")
+                else:
+                    raise ValueError(f"Lỗi khi lấy thông tin video: {error_msg[:200]}")
+            except Exception as e:
+                print(f"[yt-dlp ERROR] Exception không xác định: {type(e).__name__}: {str(e)}")
+                raise ValueError(f"Lỗi không xác định khi lấy thông tin video: {str(e)[:200]}")
         
         # Chạy trong thread pool để không block event loop
         loop = asyncio.get_event_loop()
-        info = await loop.run_in_executor(None, extract_info)
+        try:
+            info = await loop.run_in_executor(None, extract_info)
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f"Lỗi không xác định: {str(e)}")
         
         # Parse formats
         formats = []
@@ -87,6 +138,9 @@ class VideoDownloader:
         if not self._is_valid_url(url):
             raise ValueError("URL không được hỗ trợ")
         
+        # Chuẩn hóa URL Facebook
+        url = self._normalize_facebook_url(url)
+        
         # Sử dụng task_id được cung cấp
         output_template = str(self.download_dir / f"{task_id}.%(ext)s")
         
@@ -96,6 +150,18 @@ class VideoDownloader:
                 'quiet': False,
                 'no_warnings': True,
                 'progress_hooks': [progress_hook] if progress_hook else [],
+                # Cấu hình cho Facebook (hỗ trợ video, reel, watch)
+                'extractor_args': {
+                    'facebook': {
+                        'video': {
+                            'skip_dash_manifest': False,
+                        }
+                    }
+                },
+                # User agent để tránh bị chặn
+                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                # Thêm referer để tránh bị chặn
+                'referer': 'https://www.facebook.com/',
             }
             
             if audio_only:
@@ -133,9 +199,18 @@ class VideoDownloader:
                         'preferedformat': 'mp4',
                     }]
             
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                return info
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    return info
+            except yt_dlp.utils.DownloadError as e:
+                error_msg = str(e)
+                if 'Private video' in error_msg or 'login' in error_msg.lower():
+                    raise ValueError("Video này là riêng tư hoặc yêu cầu đăng nhập Facebook. Vui lòng thử với video công khai.")
+                elif 'Unsupported URL' in error_msg or 'No video formats found' in error_msg:
+                    raise ValueError(f"Không thể tải video từ URL này. Có thể video không tồn tại hoặc không hỗ trợ: {error_msg}")
+                else:
+                    raise ValueError(f"Lỗi khi tải video: {error_msg}")
         
         # Chạy trong thread pool
         loop = asyncio.get_event_loop()

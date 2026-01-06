@@ -57,7 +57,7 @@ Tải từ [FFmpeg website](https://ffmpeg.org/download.html) và thêm vào PAT
 ### 2. Cài đặt Backend
 
 ```bash
-cd backend
+source venv/bin/activate
 python -m venv venv
 source venv/bin/activate  # Trên Windows: venv\Scripts\activate
 pip install -r requirements.txt

@@ -151,8 +151,19 @@ async def root():
 async def start_download(request: DownloadRequest, background_tasks: BackgroundTasks):
     """Bắt đầu tải video"""
     try:
+        print(f"[DEBUG] Nhận request tải video: {request.url}")
+        print(f"[DEBUG] Format: {request.output_format}, Audio only: {request.audio_only}")
+        
         # Lấy thông tin video trước
-        video_info = await downloader.get_video_info(request.url)
+        try:
+            video_info = await downloader.get_video_info(request.url)
+            print(f"[DEBUG] Lấy thông tin video thành công: {video_info.title}")
+        except ValueError as e:
+            print(f"[ERROR] Lỗi validation/get info: {str(e)}")
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            print(f"[ERROR] Lỗi không xác định khi get info: {type(e).__name__}: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"Không thể lấy thông tin video: {str(e)}")
         
         # Tạo task mới
         task_id = str(uuid.uuid4())
@@ -180,9 +191,16 @@ async def start_download(request: DownloadRequest, background_tasks: BackgroundT
             video_info=video_info
         )
     
+    except HTTPException:
+        # Re-raise HTTPException
+        raise
     except ValueError as e:
+        print(f"[ERROR] ValueError: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        print(f"[ERROR] Exception không xác định: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Lỗi server: {str(e)}")
 
 
